@@ -10,10 +10,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import time
 import traceback
+
+from extract_json import extract_json
 
 # --- W&B Weave setup (graceful fallback if unavailable) ---
 WEAVE_AVAILABLE = False
@@ -101,10 +102,9 @@ def evaluate_feature(feature_id, description, verify, category, diff_text, attem
             messages=[{"role": "user", "content": user_msg}]
         )
         raw = response.content[0].text
-        # Extract JSON from response (may have markdown wrapping)
-        json_match = re.search(r'\{[\s\S]*\}', raw)
-        if json_match:
-            result = json.loads(json_match.group())
+        # Triple-fallback extraction handles direct JSON, ```json``` fences, and brace-span.
+        result = extract_json(raw)
+        if result is not None:
             result["tokens_evaluator"] = response.usage.input_tokens + response.usage.output_tokens
             return result
         else:
