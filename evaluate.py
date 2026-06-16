@@ -32,6 +32,20 @@ try:
 except Exception:
     client = None
 
+
+def _ns_evaluator_model(default="claude-sonnet-4-6"):
+    """Read models.evaluator from nightshift.config.json; fall back to default."""
+    cfg = os.environ.get(
+        "NIGHTSHIFT_CONFIG",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "nightshift", "nightshift.config.json"),
+    )
+    try:
+        with open(cfg) as f:
+            return json.load(f)["models"]["evaluator"]
+    except Exception:
+        return default
+
+
 EVALUATOR_SYSTEM_PROMPT = """You are a strict code quality evaluator for an autonomous build system called AgentForge.
 You receive a git diff and a feature specification. Score the implementation honestly.
 
@@ -96,7 +110,7 @@ def evaluate_feature(feature_id, description, verify, category, diff_text, attem
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=_ns_evaluator_model(),
             max_tokens=1500,
             system=EVALUATOR_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_msg}]

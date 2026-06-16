@@ -18,6 +18,22 @@ set -uo pipefail
 # --- Locate AgentForge home (where evaluate.py, metrics_writer.py live) ---
 AGENTFORGE_HOME="$(cd "$(dirname "$0")" && pwd)"
 
+# --- Nightshift config (model ids etc.); falls back to literals if config absent ---
+NIGHTSHIFT_CONFIG="${NIGHTSHIFT_CONFIG:-$AGENTFORGE_HOME/../nightshift/nightshift.config.json}"
+ns_cfg() {  # ns_cfg <dotted.key> <default> — prints config value, or default on any failure
+    python3 - "$NIGHTSHIFT_CONFIG" "$1" "$2" <<'PY' 2>/dev/null || echo "$2"
+import json, sys
+cfg, key, default = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    d = json.load(open(cfg))
+    for p in [x for x in key.split('.') if x]:
+        d = d[p]
+    print(d)
+except Exception:
+    print(default)
+PY
+}
+
 # --- Argument Parsing (all optional, backward-compatible defaults) ---
 FEATURE_FILE=""
 BUILD_PROMPT=""
@@ -60,7 +76,7 @@ MAX_ATTEMPTS=3          # Inner loop: max attempts per feature
 PLAN_INTERVAL=10        # Run planning pass every N outer iterations
 PUSH_INTERVAL=2         # Git push every N completed features (was 5)
 CODEX_TIMEOUT=420       # 7 minutes max per codex exec call (was 5)
-CODEX_MODEL="gpt-5.3-codex"
+CODEX_MODEL="${CODEX_MODEL:-$(ns_cfg models.builder gpt-5.3-codex)}"
 
 # --- State ---
 LOG_DIR="$PROJECT_DIR/.ralph-logs"

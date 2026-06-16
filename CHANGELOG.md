@@ -72,3 +72,7 @@ Earlier entries: `archive/CHANGELOG_ARCHIVE.md`
 - Path: ~/code/forge/agentforge → ~/code/nightshift/graveyard. GitHub: benikigai/AgentForge → benikigai/nightshift-graveyard.
 - Renamed ralph-loop.sh → graveyard.sh (git mv). Usage strings updated. AGENTFORGE_HOME var retained (self-resolving).
 - Spec: ../brief/docs/specs/nightshift-v2.md (Task 1).
+
+## Externalized model ids — 2026-06-15 (Task 3)
+- graveyard.sh reads builder model from nightshift.config.json (models.builder) via ns_cfg(); evaluate.py reads models.evaluator via _ns_evaluator_model(). Both fall back to literals if config absent.
+- Removed stale evaluator literal claude-sonnet-4-20250514 → config-driven, default claude-sonnet-4-6.
