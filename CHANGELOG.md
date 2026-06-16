@@ -76,3 +76,8 @@ Earlier entries: `archive/CHANGELOG_ARCHIVE.md`
 ## Externalized model ids — 2026-06-15 (Task 3)
 - graveyard.sh reads builder model from nightshift.config.json (models.builder) via ns_cfg(); evaluate.py reads models.evaluator via _ns_evaluator_model(). Both fall back to literals if config absent.
 - Removed stale evaluator literal claude-sonnet-4-20250514 → config-driven, default claude-sonnet-4-6.
+
+## Auth layer — subscription-first (2026-06-16) (Task 4)
+- evaluate.py: subscription-first evaluator via `claude -p` (ANTHROPIC_API_KEY stripped → Claude Max OAuth, no metered cost); Anthropic SDK kept as metered fallback; records _auth_path.
+- init.sh: no longer exits on missing API keys — verifies claude CLI + subscription login; keys are optional metered fallback.
+- Pairs with nightshift/auth.sh (ns_run_subscription key-stripping, ns_fallback_enabled gate).
