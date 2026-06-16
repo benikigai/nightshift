@@ -199,6 +199,11 @@ def notify(title, message):
     with open(os.path.join(STATE, "notifications.log"), "a") as f:
         f.write("%s | %s | %s\n" % (stamp, title, message))
     cmd = os.environ.get("NIGHTSHIFT_NOTIFY_CMD")
+    if not cmd:
+        # default to the bundled Telegram/Discord shim so alerting works out-of-the-box
+        default = os.path.join(HERE, "notify-telegram.sh")
+        if os.path.exists(default):
+            cmd = default
     if cmd:
         import subprocess
         try:
