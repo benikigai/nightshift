@@ -1,0 +1,32 @@
+{
+  "_comment": "Nightshift supervisor config. budgets.* are METERED-FALLBACK ceilings only — subscription usage is bounded by each provider's own plan ceiling (see brief/docs/specs/nightshift-v2.md 'Authentication & cost model').",
+  "version": 1,
+  "paths": {
+    "nightshift": "/Users/elias/code/nightshift/nightshift",
+    "brief": "/Users/elias/code/nightshift/brief",
+    "graveyard": "/Users/elias/code/nightshift/graveyard",
+    "handoff": "/Users/elias/code/nightshift/handoff"
+  },
+  "default_adapter": "codex",
+  "models": {
+    "builder": "gpt-5.3-codex",
+    "evaluator": "claude-sonnet-4-6"
+  },
+  "auth": {
+    "mode": "subscription_first",
+    "fallback_api": true
+  },
+  "budgets": {
+    "daily_usd": 20,
+    "per_run_usd": 5
+  },
+  "circuit_breaker": {
+    "no_progress": 3,
+    "repeated_errors": 5,
+    "permission_denial": 1,
+    "subscription_exhausted": 1
+  },
+  "notify": {
+    "telegram_id": 5611660528
+  }
+}

@@ -1,0 +1,4 @@
+state/
+*.log
+queue/active/
+telemetry.json

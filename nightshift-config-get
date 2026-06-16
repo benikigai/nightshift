@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""nightshift-config-get — read a dotted key from nightshift.config.json.
+
+Usage:
+  nightshift-config-get .paths.graveyard
+  nightshift-config-get .budgets.daily_usd
+  nightshift-config-get .auth.mode
+
+Config resolution order:
+  1. $NIGHTSHIFT_CONFIG (if set)
+  2. nightshift.config.json next to this script
+
+Scalars print raw; objects/arrays print as compact JSON. Exit 1 on missing key/file.
+"""
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CONFIG = os.environ.get("NIGHTSHIFT_CONFIG", os.path.join(HERE, "nightshift.config.json"))
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.stderr.write("usage: nightshift-config-get .dotted.key\n")
+        return 2
+    key = sys.argv[1]
+    try:
+        with open(CONFIG) as f:
+            node = json.load(f)
+    except FileNotFoundError:
+        sys.stderr.write(f"config not found: {CONFIG}\n")
+        return 1
+    except json.JSONDecodeError as e:
+        sys.stderr.write(f"config is not valid JSON: {e}\n")
+        return 1
+
+    for part in (p for p in key.split(".") if p):
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            sys.stderr.write(f"key not found: {key}\n")
+            return 1
+
+    if isinstance(node, (dict, list)):
+        print(json.dumps(node))
+    elif isinstance(node, bool):
+        print("true" if node else "false")
+    else:
+        print(node)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
