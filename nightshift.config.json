@@ -33,6 +33,9 @@
     "enabled": true,
     "auto_pr": false
   },
+  "worktrees": {
+    "enabled": true
+  },
   "notify": {
     "telegram_id": 5611660528
   }

@@ -90,30 +90,63 @@ process_one() {
     active="$(claim_oldest)" || return 10
     name="$(basename "$active")"
     adapter="$(ns_cfg default_adapter codex)"
-    workdir="${NIGHTSHIFT_WORKDIR:-$(ns_cfg paths.graveyard "$SUP_DIR/../graveyard")}"
     logf="$LOGS/${name%.json}.$(date '+%Y%m%dT%H%M%S').log"
+
+    # --- workdir: isolated git worktree per shift (T10), falling back to the shared base dir ---
+    local base worktree="" ws br t pv dest ret=0
+    base="${NIGHTSHIFT_WORKDIR:-$(ns_cfg paths.graveyard "$SUP_DIR/../graveyard")}"
+    workdir="$base"
+    case "$(ns_cfg worktrees.enabled true)" in
+        True|true|1)
+            if git -C "$base" rev-parse --git-dir >/dev/null 2>&1; then
+                ws="$STATE/worktrees/${name%.shift.json}"; br="nightshift/${name%.shift.json}"
+                git -C "$base" worktree remove --force "$ws" >/dev/null 2>&1 || true
+                rm -rf "$ws" 2>/dev/null || true
+                for t in 1 2 3 4; do
+                    if git -C "$base" worktree add -f "$ws" -b "$br" >/dev/null 2>&1 \
+                       || git -C "$base" worktree add -f "$ws" "$br" >/dev/null 2>&1; then
+                        worktree="$ws"; workdir="$ws"; break
+                    fi
+                    sleep 0.3
+                done
+            fi
+            ;;
+    esac
+
+    # --- inject prior failed approaches for this shift (hypothesis memory, T10) ---
+    python3 "$SUP_DIR/memory.py" inject "$name" "$workdir" >/dev/null 2>&1 || true
+
     python3 "$GUARD" rate-record >/dev/null 2>&1 || true
     log "processing $name via '$adapter' adapter (workdir=$workdir)"
     bash "$SUP_DIR/adapters/$adapter.sh" build --features "$active" --workdir "$workdir" >"$logf" 2>&1
     rc=$?
     python3 "$GUARD" ingest-telemetry "$workdir/telemetry.json" "$rc" >/dev/null 2>&1 || true
+
+    # --- route outcome + record to hypothesis memory ---
     if [ "$rc" -ne 0 ]; then
-        mv "$active" "$QUEUE/failed/$name"
+        dest="failed"; ret="$rc"
+        python3 "$SUP_DIR/memory.py" record "$name" failed "build rc=$rc" >/dev/null 2>&1 || true
         log "FAILED $name rc=$rc (log: $logf)"
-        return "$rc"
+    else
+        case "$(ns_cfg review.enabled true)" in
+            True|true|1)
+                review_phase "$name" "$workdir"; pv=$?
+                case "$pv" in
+                    0)  dest="done";    rm -f "$STATE/recovery/$name.count"; python3 "$SUP_DIR/memory.py" record "$name" done >/dev/null 2>&1 || true; log "DONE+APPROVED $name" ;;
+                    13) dest="pending"; python3 "$SUP_DIR/memory.py" record "$name" blocked "review requeue" >/dev/null 2>&1 || true; log "REQUEUED $name (review)" ;;
+                    14) dest="failed";  rm -f "$STATE/recovery/$name.count"; python3 "$SUP_DIR/memory.py" record "$name" blocked "review escalated" >/dev/null 2>&1 || true; log "FAILED+ESCALATED $name (review)" ;;
+                esac ;;
+            *) dest="done"; rm -f "$STATE/recovery/$name.count"; log "DONE $name (review disabled)" ;;
+        esac
     fi
-    # build OK -> Handoff review phase (T9), unless disabled
-    case "$(ns_cfg review.enabled true)" in
-        True|true|1) ;;
-        *) mv "$active" "$QUEUE/done/$name"; rm -f "$STATE/recovery/$name.count"; log "DONE $name (review disabled)"; return 0 ;;
-    esac
-    review_phase "$name" "$workdir"; local pv=$?
-    case "$pv" in
-        0)  mv "$active" "$QUEUE/done/$name";    rm -f "$STATE/recovery/$name.count"; log "DONE+APPROVED $name" ;;
-        13) mv "$active" "$QUEUE/pending/$name"; log "REQUEUED $name (review)" ;;
-        14) mv "$active" "$QUEUE/failed/$name";  rm -f "$STATE/recovery/$name.count"; log "FAILED+ESCALATED $name (review)" ;;
-    esac
-    return 0
+
+    # --- clean up the worktree (commits persist on the branch, so removal is safe) ---
+    if [ -n "$worktree" ]; then
+        git -C "$base" worktree remove --force "$worktree" >/dev/null 2>&1 || rm -rf "$worktree"
+    fi
+
+    mv "$active" "$QUEUE/$dest/$name"
+    return "$ret"
 }
 
 MODE="${1:-once}"
