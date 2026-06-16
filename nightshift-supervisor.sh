@@ -27,7 +27,17 @@ if [ -z "${NS_CAFFEINATED:-}" ] && [ -z "${NS_NO_CAFFEINATE:-}" ] && command -v 
     exec caffeinate -s env NS_CAFFEINATED=1 "$0" "$@"
 fi
 
+# Load daemon secrets (e.g. CLAUDE_CODE_OAUTH_TOKEN for headless Claude Max) — kept OUT of the
+# launchd plist and out of git. auth.sh strips metered API keys but preserves this token.
+NS_SECRETS="${NIGHTSHIFT_SECRETS:-$HOME/.config/nightshift/secrets.env}"
+# shellcheck source=/dev/null
+[ -f "$NS_SECRETS" ] && . "$NS_SECRETS"
+
 slog() { printf '[supervisor %s] %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$*" | tee -a "$SUP_LOG"; }
+
+prune_logs() {  # rotate: drop per-shift logs older than retention so $STATE can't grow unbounded
+    find "$STATE/logs" -type f -name '*.log' -mtime +"${NS_LOG_RETAIN_DAYS:-14}" -delete 2>/dev/null || true
+}
 
 HALT_BACKOFF="${NS_HALT_BACKOFF:-600}"   # when the breaker is OPEN, stay up and re-check this often
 LOCK="$STATE/supervisor.lock"
@@ -126,6 +136,7 @@ run_loop() {  # run_loop [drain]
 
 slog "supervisor starting (queue=$QUEUE, idle=${IDLE}s)"
 acquire_lock || exit 0
+prune_logs
 recover_orphans
 case "${1:-daemon}" in
     --drain-once) run_loop drain ;;

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Nightshift supervisor launchd job (TEMPLATE).
+     Install: cp this to ~/Library/LaunchAgents/ then `launchctl load` it (see RUNBOOK.md).
+     KeepAlive={SuccessfulExit:false} + ThrottleInterval: a CLEAN exit (graceful unload) stays
+     stopped; only a CRASH respawns, and never faster than every 60s — so an OPEN breaker (the
+     supervisor stays up-but-idle in that case) cannot turn into a respawn/alert-spam loop. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.nightshift.supervisor</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/elias/code/nightshift/nightshift/nightshift-supervisor.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/elias/code/nightshift/nightshift</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+
+  <!-- launchd starts with a minimal PATH; include brew + ~/bin so claude/codex/agy/gtimeout resolve.
+       Secrets (CLAUDE_CODE_OAUTH_TOKEN) are NOT here — the supervisor sources them from
+       ~/.config/nightshift/secrets.env (chmod 600). -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/Users/elias/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/elias/code/nightshift/nightshift/state/supervisor.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/elias/code/nightshift/nightshift/state/supervisor.err</string>
+</dict>
+</plist>

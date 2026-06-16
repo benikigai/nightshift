@@ -1,4 +1,10 @@
-state/
+*.key
 *.log
+*.pem
+*secret*
+.env
+.env.*
+credentials.json
 queue/active/
+state/
 telemetry.json
