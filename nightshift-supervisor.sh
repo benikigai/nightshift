@@ -61,11 +61,25 @@ run_loop() {  # run_loop [drain]
         write_checkpoint "dispatching"
         bash "$SUP_DIR/dispatch.sh" once
         rc=$?
-        if [ "$rc" -eq 10 ]; then
-            if [ "$drain" = "drain" ]; then slog "queue empty — drain-once complete"; write_checkpoint "drained"; return 0; fi
-            write_checkpoint "idle"
-            sleep "$IDLE"
-        fi
+        case "$rc" in
+            11)  # guardrail halt (breaker OPEN / budget exceeded) — already notified by dispatch
+                slog "dispatch HALTED by guardrail — stopping supervisor (reset: guard.py breaker-reset)"
+                write_checkpoint "halted"
+                return 0
+                ;;
+            12)  # rate-limited this hour — wait it out
+                write_checkpoint "rate_limited"
+                [ "$drain" = "drain" ] && { slog "rate-limited — drain-once stops"; return 0; }
+                sleep "$IDLE"
+                ;;
+            10)  # queue empty
+                if [ "$drain" = "drain" ]; then slog "queue empty — drain-once complete"; write_checkpoint "drained"; return 0; fi
+                write_checkpoint "idle"
+                sleep "$IDLE"
+                ;;
+            *)   # processed a shift (0 or build rc); loop on to the next immediately
+                : ;;
+        esac
     done
 }
 

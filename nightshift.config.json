@@ -26,6 +26,9 @@
     "permission_denial": 1,
     "subscription_exhausted": 1
   },
+  "rate": {
+    "hourly_call_cap": 60
+  },
   "notify": {
     "telegram_id": 5611660528
   }

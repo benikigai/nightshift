@@ -44,14 +44,32 @@ claim_oldest() {
 
 process_one() {
     local active name adapter workdir logf rc
+    local GUARD="$SUP_DIR/guard.py"
+    # --- guardrails: refuse to dispatch when halted ---
+    if python3 "$GUARD" breaker-open 2>/dev/null; then
+        python3 "$GUARD" notify "Nightshift HALTED" "circuit breaker OPEN: $(python3 "$GUARD" breaker-reason 2>/dev/null)" >/dev/null 2>&1
+        log "HALT: circuit breaker OPEN — not dispatching (reset: guard.py breaker-reset)"
+        return 11
+    fi
+    if python3 "$GUARD" budget-exceeded 2>/dev/null; then
+        python3 "$GUARD" notify "Nightshift HALTED" "daily metered budget exceeded" >/dev/null 2>&1
+        log "HALT: daily metered budget exceeded — not dispatching"
+        return 11
+    fi
+    if python3 "$GUARD" rate-exceeded 2>/dev/null; then
+        log "rate limit reached this hour — waiting"
+        return 12
+    fi
     active="$(claim_oldest)" || return 10
     name="$(basename "$active")"
     adapter="$(ns_cfg default_adapter codex)"
     workdir="${NIGHTSHIFT_WORKDIR:-$(ns_cfg paths.graveyard "$SUP_DIR/../graveyard")}"
     logf="$LOGS/${name%.json}.$(date '+%Y%m%dT%H%M%S').log"
+    python3 "$GUARD" rate-record >/dev/null 2>&1 || true
     log "processing $name via '$adapter' adapter (workdir=$workdir)"
     bash "$SUP_DIR/adapters/$adapter.sh" build --features "$active" --workdir "$workdir" >"$logf" 2>&1
     rc=$?
+    python3 "$GUARD" ingest-telemetry "$workdir/telemetry.json" "$rc" >/dev/null 2>&1 || true
     if [ "$rc" -eq 0 ]; then
         mv "$active" "$QUEUE/done/$name"
         log "DONE $name (log: $logf)"
