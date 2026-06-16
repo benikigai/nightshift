@@ -14,7 +14,7 @@
   },
   "auth": {
     "mode": "subscription_first",
-    "fallback_api": true
+    "fallback_api": false
   },
   "budgets": {
     "daily_usd": 20,

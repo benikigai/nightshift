@@ -1,24 +1,14 @@
 #!/usr/bin/env python3
 """nightshift/guard.py — budget ledger, circuit breaker, rate limiter, notifications.
 
-State lives in $NIGHTSHIFT_STATE (default nightshift/state/):
-  budget.json  {date, daily_usd_spent}
-  breaker.json {state, no_progress, errors, reason}
-  rate.json    {hour, calls}
-  notifications.log  (append-only audit)
+Fail-safe by design (Pass-1 review remediation):
+  - state writes are atomic (temp + os.replace) so a crash can't corrupt the ledger
+  - a CORRUPT state file fails SAFE (breaker treated OPEN, budget treated exceeded)
+  - an unreadable config fails the budget cap CLOSED (cap defaults to 0, not infinity)
+  - the breaker emits its HALT notification once, on the CLOSED->OPEN edge (no alert-spam)
 
-Subcommands (exit 0 = "yes/true" for the *-exceeded / breaker-open checks):
-  budget-record <usd>        add metered spend to today's ledger
-  budget-status              print json {date, spent, cap, remaining}
-  budget-exceeded            exit 0 iff today's metered spend >= daily cap
-  breaker-record <outcome> [sig]   outcome: progress|no_progress|error|permission_denial|subscription_exhausted
-  breaker-open               exit 0 iff breaker state == OPEN
-  breaker-reason             print the OPEN reason
-  breaker-reset              force CLOSED, clear counters
-  rate-record                increment this hour's call count
-  rate-exceeded              exit 0 iff calls this hour >= cap
-  ingest-telemetry <file> <rc>     record budget + breaker outcome from an adapter telemetry.json
-  notify <title> <message>   append to notifications.log; run $NIGHTSHIFT_NOTIFY_CMD if set
+State in $NIGHTSHIFT_STATE (default nightshift/state/): budget.json, breaker.json, rate.json,
+notifications.log. Subcommands: see main(). Exit 0 = "yes/true" for the *-exceeded / breaker-open checks.
 """
 import datetime
 import json
@@ -29,24 +19,38 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.environ.get("NIGHTSHIFT_CONFIG", os.path.join(HERE, "nightshift.config.json"))
 STATE = os.environ.get("NIGHTSHIFT_STATE", os.path.join(HERE, "state"))
 
+_CONFIG_OK = True
+
 
 def cfg():
+    global _CONFIG_OK
     try:
         return json.load(open(CONFIG))
     except Exception:
+        _CONFIG_OK = False
         return {}
 
 
-def _load(name, default):
-    try:
-        return json.load(open(os.path.join(STATE, name)))
-    except Exception:
+def _load(name, default, fail_safe=None):
+    """Missing file -> default (clean start). Corrupt file -> fail_safe if given, else default."""
+    p = os.path.join(STATE, name)
+    if not os.path.exists(p):
         return dict(default)
+    try:
+        return json.load(open(p))
+    except Exception:
+        return dict(fail_safe) if fail_safe is not None else dict(default)
 
 
 def _save(name, data):
     os.makedirs(STATE, exist_ok=True)
-    json.dump(data, open(os.path.join(STATE, name), "w"), indent=2)
+    p = os.path.join(STATE, name)
+    tmp = p + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, p)  # atomic on POSIX
 
 
 def _today():
@@ -68,29 +72,37 @@ def budget_record(usd):
 
 
 def _spent_today():
-    b = _load("budget.json", {"date": _today(), "daily_usd_spent": 0.0})
+    # corrupt ledger -> treat as infinite spend (fail closed)
+    b = _load("budget.json", {"date": _today(), "daily_usd_spent": 0.0},
+              fail_safe={"date": _today(), "daily_usd_spent": float("inf")})
     return float(b.get("daily_usd_spent", 0.0)) if b.get("date") == _today() else 0.0
 
 
 def budget_status():
     cap = float(cfg().get("budgets", {}).get("daily_usd", 0))
     spent = _spent_today()
-    print(json.dumps({"date": _today(), "spent": spent, "cap": cap, "remaining": round(cap - spent, 6)}))
+    print(json.dumps({"date": _today(), "spent": spent, "cap": cap,
+                      "remaining": round(cap - spent, 6), "config_ok": _CONFIG_OK}))
 
 
 def budget_exceeded():
-    cap = float(cfg().get("budgets", {}).get("daily_usd", float("inf")))
+    # cap defaults to 0 so an unreadable config fails CLOSED (halts spend), never open-to-infinity
+    cap = float(cfg().get("budgets", {}).get("daily_usd", 0))
     sys.exit(0 if _spent_today() >= cap else 1)
 
 
 # --- circuit breaker ---
 def _breaker():
-    return _load("breaker.json", {"state": "CLOSED", "no_progress": 0, "errors": {}, "reason": ""})
+    return _load("breaker.json",
+                 {"state": "CLOSED", "no_progress": 0, "errors": {}, "reason": "", "notified": False},
+                 fail_safe={"state": "OPEN", "no_progress": 0, "errors": {},
+                            "reason": "corrupt breaker state — failing safe", "notified": False})
 
 
 def breaker_record(outcome, sig=""):
     cb = cfg().get("circuit_breaker", {})
     b = _breaker()
+    was_open = b.get("state") == "OPEN"
     if outcome == "progress":
         b["no_progress"] = 0
         b["errors"] = {}
@@ -115,6 +127,12 @@ def breaker_record(outcome, sig=""):
         else:
             b["state"] = "OPEN"
             b["reason"] = "subscription pool exhausted (no metered fallback)"
+    now_open = b.get("state") == "OPEN"
+    if now_open and not was_open:
+        b["notified"] = True
+        notify("Nightshift breaker OPEN — dispatch halted", b.get("reason", ""))
+    elif not now_open:
+        b["notified"] = False
     _save("breaker.json", b)
     print(json.dumps(b))
 
@@ -128,7 +146,7 @@ def breaker_reason():
 
 
 def breaker_reset():
-    _save("breaker.json", {"state": "CLOSED", "no_progress": 0, "errors": {}, "reason": ""})
+    _save("breaker.json", {"state": "CLOSED", "no_progress": 0, "errors": {}, "reason": "", "notified": False})
     print("CLOSED")
 
 
@@ -161,7 +179,12 @@ def ingest_telemetry(path, rc):
     status = t.get("status", "ok" if str(rc) == "0" else "failed")
     if auth == "fallback" and cost > 0:
         budget_record(cost)
-    if signal in ("permission_denial", "subscription_exhausted"):
+        per_run = float(cfg().get("budgets", {}).get("per_run_usd", 0) or 0)
+        if per_run and cost > per_run:
+            notify("Nightshift per-run budget exceeded", "shift cost $%.4f > cap $%.4f" % (cost, per_run))
+            breaker_record("error", "per_run_budget")
+            return
+    if signal in ("permission_denial", "subscription_exhausted", "no_progress"):
         breaker_record(signal)
     elif status == "ok":
         breaker_record("progress")

@@ -35,16 +35,23 @@ ns_fallback_enabled() {
     esac
 }
 
-# ns_run_subscription <cmd...> — run a command with metered API keys stripped,
+# ns_run_subscription <cmd...> — run a command with ALL metered provider keys stripped,
 # forcing subscription/OAuth auth. Returns the command's exit code.
 ns_run_subscription() {
-    env -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u GEMINI_API_KEY "$@"
+    env -u ANTHROPIC_API_KEY \
+        -u OPENAI_API_KEY \
+        -u GEMINI_API_KEY \
+        -u GOOGLE_API_KEY \
+        -u GOOGLE_GENAI_API_KEY \
+        -u GOOGLE_APPLICATION_CREDENTIALS \
+        "$@"
 }
 
-# ns_run_metered <cmd...> — run a command WITH whatever keys are in the env (metered).
-# Only call this from the dispatcher's fallback path, gated by ns_fallback_enabled and
-# bounded by the daily/per-run budget ledger (Task 8). Keys must be injected by the
-# caller's environment (e.g. sourced from shell-secrets) — never hard-coded here.
+# ns_run_metered <cmd...> — RESERVED for a future metered-fallback task. Runs a command WITH
+# whatever keys are in the env (metered). NOT WIRED YET: auth.fallback_api defaults false, so the
+# loop is subscription-only and the breaker HALTS on subscription exhaustion rather than falling
+# back. Wiring this requires per-provider rate-limit detection + telemetry auth_path=fallback +
+# real cost_usd so guard.py's budget ledger (daily + per_run) actually engages.
 ns_run_metered() {
     "$@"
 }
