@@ -2,11 +2,14 @@
 
 Controlled agent work loops for GitHub tasks.
 
+A lights-out software factory pattern for agentic development: scoped specs go
+in, build/review/guard loops run, and only passing work gets committed.
+
 [Product page](https://nightshift.kogenlabs.dev) |
 [Original AgentForge demo](https://agent-forge-rho-ten.vercel.app)
 
 Nightshift is an agentic development supervisor. It turns a scoped task into a
-bounded loop:
+bounded, auditable loop:
 
 ```txt
 spec -> build -> gate -> evaluate -> retry or commit -> audit
