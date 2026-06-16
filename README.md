@@ -1,13 +1,15 @@
-# Nightshift Graveyard
+# Nightshift
 
-Self-improving agent build loop with quality backpressure.
+Agentic development supervisor with a self-improving build loop and quality
+backpressure.
 
-[Live AgentForge demo](https://agent-forge-rho-ten.vercel.app) |
-[Nightshift product page](https://nightshift.kogenlabs.dev)
+[Product page](https://nightshift.kogenlabs.dev) |
+[Original AgentForge demo](https://agent-forge-rho-ten.vercel.app)
 
 This repo started as **AgentForge**, the Ralph Loop hackathon demo. It is now the
-public proof run behind **Nightshift**: a supervisor for queued agentic
-development work.
+public proof run behind **Nightshift**: a supervisor for queued GitHub work that
+routes builds through Graveyard, reviews through Handoff, and stops when
+guardrails say stop.
 
 The app is the receipt. It visualizes the autonomous build process that created
 it: every feature, attempt, score, token count, commit, and failure recovery.
@@ -40,19 +42,20 @@ The important part is the quality gate. The builder does not grade itself. A
 separate evaluator reviews the work, rejects weak attempts, and gives targeted
 feedback before the loop tries again.
 
-## From AgentForge to Nightshift
+## Capabilities
 
-AgentForge proved that a build loop could make visible progress without a human
-staring at every step.
-
-Nightshift turns that idea into a reusable system:
-
-- **Nightshift**: the supervisor that watches queued GitHub work.
+- **Nightshift**: the supervisor that watches queued GitHub work and keeps an
+  audit trail for every shift.
 - **Graveyard**: the build loop that executes one scoped task at a time.
 - **Handoff**: the review layer that decides approve, request changes, requeue,
   or escalate.
 - **Guard**: budgets, rate limits, circuit breakers, permissions, and audit
   controls.
+
+## From AgentForge to Nightshift
+
+AgentForge proved that a build loop could make visible progress without a human
+staring at every step. Nightshift turns that idea into a reusable system.
 
 If you want the product story, start here:
 
