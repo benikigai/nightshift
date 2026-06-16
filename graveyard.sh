@@ -8,11 +8,11 @@
 # The evaluator (Sonnet via evaluate.py) scores and provides feedback.
 #
 # Usage:
-#   ./ralph-loop.sh                                          # Default: AgentForge project
-#   ./ralph-loop.sh --features path/to/features.json         # Custom feature list
-#   ./ralph-loop.sh --prompt path/to/PROMPT_build.md         # Custom build prompt
-#   ./ralph-loop.sh --project-dir /path/to/project           # Run in different directory
-#   ./ralph-loop.sh --features f.json --prompt p.md --project-dir /proj  # All combined
+#   ./graveyard.sh                                          # Default: AgentForge project
+#   ./graveyard.sh --features path/to/features.json         # Custom feature list
+#   ./graveyard.sh --prompt path/to/PROMPT_build.md         # Custom build prompt
+#   ./graveyard.sh --project-dir /path/to/project           # Run in different directory
+#   ./graveyard.sh --features f.json --prompt p.md --project-dir /proj  # All combined
 set -uo pipefail
 
 # --- Locate AgentForge home (where evaluate.py, metrics_writer.py live) ---
@@ -31,7 +31,7 @@ while [[ $# -gt 0 ]]; do
         --plan-prompt)  PLAN_PROMPT="$2"; shift 2 ;;
         --project-dir)  WORK_DIR="$2"; shift 2 ;;
         --help|-h)
-            echo "Usage: ralph-loop.sh [OPTIONS]"
+            echo "Usage: graveyard.sh [OPTIONS]"
             echo "  --features <path>      Feature list JSON (default: feature_list.json)"
             echo "  --prompt <path>        Build prompt file (default: PROMPT_build.md)"
             echo "  --plan-prompt <path>   Planning prompt file (default: PROMPT_plan.md)"

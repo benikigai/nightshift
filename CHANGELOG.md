@@ -66,3 +66,9 @@
 - `d852075` init: existing harness files
 
 Earlier entries: `archive/CHANGELOG_ARCHIVE.md`
+
+## Renamed to Nightshift — 2026-06-15
+- AgentForge → **Graveyard** (the overnight build loop of the Nightshift stack).
+- Path: ~/code/forge/agentforge → ~/code/nightshift/graveyard. GitHub: benikigai/AgentForge → benikigai/nightshift-graveyard.
+- Renamed ralph-loop.sh → graveyard.sh (git mv). Usage strings updated. AGENTFORGE_HOME var retained (self-resolving).
+- Spec: ../brief/docs/specs/nightshift-v2.md (Task 1).
