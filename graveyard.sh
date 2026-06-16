@@ -60,7 +60,7 @@ done
 
 # --- Resolve paths ---
 PROJECT_DIR="${WORK_DIR:-$AGENTFORGE_HOME}"
-cd "$PROJECT_DIR"
+cd "$PROJECT_DIR" || { echo "graveyard: cannot cd to project dir: $PROJECT_DIR" >&2; exit 1; }
 
 FEATURE_FILE="${FEATURE_FILE:-feature_list.json}"
 BUILD_PROMPT="${BUILD_PROMPT:-PROMPT_build.md}"
@@ -193,7 +193,7 @@ while true; do
                 --full-auto -m "$CODEX_MODEL" \
                 2>&1 | tee "$LOG_DIR/iteration-${ITERATION}-plan.log" || true
             log "Pushing to origin (post-planning)..."
-            git push origin HEAD 2>&1 || log "WARNING: git push failed (network?)"
+            if [ -n "${NIGHTSHIFT_NO_PUSH:-}" ]; then log "push skipped (NIGHTSHIFT_NO_PUSH set)"; else git push origin HEAD 2>&1 || log "WARNING: git push failed (network?)"; fi
         else
             log "SKIP: No planning prompt found at $PLAN_PROMPT"
         fi
@@ -476,7 +476,7 @@ print(json.dumps(entry))
         # Push frequently for deploys
         if (( FEATURES_COMPLETED % PUSH_INTERVAL == 0 )); then
             log "Pushing to origin ($FEATURES_COMPLETED features done)..."
-            git push origin HEAD 2>&1 || log "WARNING: git push failed (network?)"
+            if [ -n "${NIGHTSHIFT_NO_PUSH:-}" ]; then log "push skipped (NIGHTSHIFT_NO_PUSH set)"; else git push origin HEAD 2>&1 || log "WARNING: git push failed (network?)"; fi
         fi
 
     else
@@ -535,7 +535,7 @@ done
 
 # --- Final Push ---
 log "Final push to origin..."
-git push origin HEAD 2>&1 || log "WARNING: final push failed"
+if [ -n "${NIGHTSHIFT_NO_PUSH:-}" ]; then log "final push skipped (NIGHTSHIFT_NO_PUSH set)"; else git push origin HEAD 2>&1 || log "WARNING: final push failed"; fi
 
 log ""
 log "=== AgentForge Ralph Loop Complete ==="

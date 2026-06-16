@@ -81,3 +81,7 @@ Earlier entries: `archive/CHANGELOG_ARCHIVE.md`
 - evaluate.py: subscription-first evaluator via `claude -p` (ANTHROPIC_API_KEY stripped → Claude Max OAuth, no metered cost); Anthropic SDK kept as metered fallback; records _auth_path.
 - init.sh: no longer exits on missing API keys — verifies claude CLI + subscription login; keys are optional metered fallback.
 - Pairs with nightshift/auth.sh (ns_run_subscription key-stripping, ns_fallback_enabled gate).
+
+## Nightshift review Pass 1 — 2026-06-16
+- Gate all `git push origin HEAD` behind NIGHTSHIFT_NO_PUSH (set by codex.sh) so unattended/unreviewed builds stay local until Nightshift's review gate approves.
+- Guard `cd "$PROJECT_DIR"` so a bad project dir can't run git add/commit in the wrong tree.
