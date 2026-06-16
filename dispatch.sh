@@ -42,6 +42,33 @@ claim_oldest() {
     return 1
 }
 
+# review_phase <name> <workdir> — post-build Handoff review.
+# Returns: 0 approved | 13 re-queued with recovery hint | 14 escalated (give up).
+review_phase() {
+    local name="$1" workdir="$2" verdict hint cycle cyclefile
+    verdict="$(bash "$SUP_DIR/handoff.sh" review --workdir "$workdir" 2>/dev/null | tail -1)"
+    [ -n "$verdict" ] || verdict="BLOCK"
+    log "review verdict for $name: $verdict"
+    if [ "$verdict" = "APPROVE" ]; then
+        bash "$SUP_DIR/handoff.sh" pr --workdir "$workdir" >/dev/null 2>&1 || true
+        return 0
+    fi
+    cyclefile="$STATE/recovery/$name.count"
+    cycle="$(cat "$cyclefile" 2>/dev/null || echo 0)"; cycle=$((cycle + 1))
+    if [ "$cycle" -ge 2 ]; then
+        python3 "$SUP_DIR/guard.py" notify "Nightshift ESCALATION" \
+            "$name failed review after $cycle cycles ($verdict) — needs a human" >/dev/null 2>&1 || true
+        return 14
+    fi
+    mkdir -p "$STATE/recovery"; echo "$cycle" > "$cyclefile"
+    hint="$(bash "$SUP_DIR/handoff.sh" triage --workdir "$workdir" 2>/dev/null)"
+    [ -n "$hint" ] || hint="Address the review findings."
+    mkdir -p "$workdir/.ralph-logs"
+    printf '## Recovery hint (review cycle %s, verdict %s)\n%s\n\n' "$cycle" "$verdict" "$hint" >> "$workdir/.ralph-logs/feedback.md"
+    log "re-queueing $name with recovery hint (cycle $cycle)"
+    return 13
+}
+
 process_one() {
     local active name adapter workdir logf rc
     local GUARD="$SUP_DIR/guard.py"
@@ -70,14 +97,23 @@ process_one() {
     bash "$SUP_DIR/adapters/$adapter.sh" build --features "$active" --workdir "$workdir" >"$logf" 2>&1
     rc=$?
     python3 "$GUARD" ingest-telemetry "$workdir/telemetry.json" "$rc" >/dev/null 2>&1 || true
-    if [ "$rc" -eq 0 ]; then
-        mv "$active" "$QUEUE/done/$name"
-        log "DONE $name (log: $logf)"
-    else
+    if [ "$rc" -ne 0 ]; then
         mv "$active" "$QUEUE/failed/$name"
         log "FAILED $name rc=$rc (log: $logf)"
+        return "$rc"
     fi
-    return "$rc"
+    # build OK -> Handoff review phase (T9), unless disabled
+    case "$(ns_cfg review.enabled true)" in
+        True|true|1) ;;
+        *) mv "$active" "$QUEUE/done/$name"; rm -f "$STATE/recovery/$name.count"; log "DONE $name (review disabled)"; return 0 ;;
+    esac
+    review_phase "$name" "$workdir"; local pv=$?
+    case "$pv" in
+        0)  mv "$active" "$QUEUE/done/$name";    rm -f "$STATE/recovery/$name.count"; log "DONE+APPROVED $name" ;;
+        13) mv "$active" "$QUEUE/pending/$name"; log "REQUEUED $name (review)" ;;
+        14) mv "$active" "$QUEUE/failed/$name";  rm -f "$STATE/recovery/$name.count"; log "FAILED+ESCALATED $name (review)" ;;
+    esac
+    return 0
 }
 
 MODE="${1:-once}"

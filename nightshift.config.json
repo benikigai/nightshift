@@ -29,6 +29,10 @@
   "rate": {
     "hourly_call_cap": 60
   },
+  "review": {
+    "enabled": true,
+    "auto_pr": false
+  },
   "notify": {
     "telegram_id": 5611660528
   }
