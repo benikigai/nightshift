@@ -1,15 +1,17 @@
 # Nightshift
 
-Controlled agent work loops for GitHub tasks.
+Controlled agent harness for lights-out software work.
 
-A lights-out software factory pattern for agentic development: scoped specs go
-in, build/review/guard loops run, and only passing work gets committed.
+Nightshift runs persistent Ralph Loops over scoped GitHub tasks: build, gate,
+evaluate, retry, commit, audit.
 
 [Product page](https://nightshift.kogenlabs.dev) |
 [Original AgentForge demo](https://agent-forge-rho-ten.vercel.app)
 
-Nightshift is an agentic development supervisor. It turns a scoped task into a
-bounded, auditable loop:
+It is a lights-out software factory pattern for agentic development. Scoped
+specs go in, build/review/guard loops run, and only passing work gets committed.
+
+At the core is a bounded, auditable loop:
 
 ```txt
 spec -> build -> gate -> evaluate -> retry or commit -> audit
