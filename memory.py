@@ -46,8 +46,10 @@ def inject(shift, workdir):
     if not failed:
         print("no prior failures")
         return
-    fb = os.path.join(workdir, ".ralph-logs", "feedback.md")
-    os.makedirs(os.path.dirname(fb), exist_ok=True)
+    # write to nightshift-memory.md (NOT .ralph-logs/feedback.md, which graveyard.sh blanks);
+    # adapters surface this file into the build prompt.
+    os.makedirs(workdir, exist_ok=True)
+    fb = os.path.join(workdir, "nightshift-memory.md")
     with open(fb, "a") as f:
         f.write("\n## Do NOT repeat these previously-failed approaches for this shift:\n")
         for r in failed:

@@ -38,12 +38,27 @@ fi
 [ -n "$FEATURES" ] && [ -n "$WORKDIR" ] || { echo "codex.sh: --features and --workdir are required" >&2; exit 2; }
 [ -f "$GRAVEYARD" ] || { echo "codex.sh: graveyard build loop not found at $GRAVEYARD" >&2; exit 2; }
 
-# --- run the build loop, subscription-first (OPENAI_API_KEY stripped -> ChatGPT login) ---
-AUTH_PATH="subscription"
-ARGS=(--features "$FEATURES" --project-dir "$WORKDIR")
-[ -n "$PROMPT" ] && ARGS+=(--prompt "$PROMPT")
+[ -d "$WORKDIR" ] || { echo "codex.sh: workdir '$WORKDIR' does not exist" >&2; exit 2; }
 
-ns_run_subscription bash "$GRAVEYARD" "${ARGS[@]}"
+# --- isolate a mutable copy of the shift: graveyard.sh marks passes=true IN PLACE, so never let
+#     it mutate the canonical queue file (a review-requeue would otherwise become a no-op) ---
+SHIFT_COPY="$WORKDIR/shift.json"
+cp "$FEATURES" "$SHIFT_COPY" 2>/dev/null || { echo "codex.sh: cannot copy shift into workdir" >&2; exit 2; }
+
+# --- build prompt = base instructions + Nightshift memory (graveyard blanks .ralph-logs/feedback.md,
+#     so cross-attempt hints must ride the prompt instead) ---
+GVDIR="$(dirname "$GRAVEYARD")"
+BASE_PROMPT="${PROMPT:-$GVDIR/PROMPT_build.md}"
+COMBINED="$WORKDIR/.nightshift-build-prompt.md"
+{ cat "$BASE_PROMPT" 2>/dev/null || true
+  if [ -f "$WORKDIR/nightshift-memory.md" ]; then echo; echo "---"; cat "$WORKDIR/nightshift-memory.md"; fi
+} > "$COMBINED"
+
+# --- run the build loop, subscription-first (OPENAI_API_KEY stripped -> ChatGPT login);
+#     NIGHTSHIFT_NO_PUSH keeps unreviewed code local until the review gate approves ---
+AUTH_PATH="subscription"
+NIGHTSHIFT_NO_PUSH=1 ns_run_subscription bash "$GRAVEYARD" \
+    --features "$SHIFT_COPY" --project-dir "$WORKDIR" --prompt "$COMBINED"
 EXIT=$?
 
 # --- telemetry (token/cost are best-effort from the project's metrics.json totals) ---

@@ -43,12 +43,15 @@ command -v "$AGY_BIN" >/dev/null 2>&1 || fallback_to_claude "agy not on PATH"
 
 tasks="$(cat "$FEATURES" 2>/dev/null)"
 extra="$(cat "$PROMPT" 2>/dev/null || true)"
-full="You are building one shift. Implement every task whose passes=false in this JSON array of {id,category,description,verify}. Write complete code — no TODOs/stubs — and make it build. If .ralph-logs/feedback.md exists, do NOT repeat the failed approaches listed there.
+mem="$(cat "$WORKDIR/nightshift-memory.md" 2>/dev/null || true)"
+full="You are building one shift. Implement every task whose passes=false in this JSON array of {id,category,description,verify}. Write complete code — no TODOs/stubs — and make it build.
 
 ## Shift tasks
 ${tasks}
 
-${extra}"
+${extra}
+
+${mem}"
 
 out="$(cd "$WORKDIR" && ns_run_subscription "$AGY_BIN" -p --sandbox "$full" 2>&1)"; rc=$?
 if [ "$rc" -ne 0 ]; then

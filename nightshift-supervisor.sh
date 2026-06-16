@@ -29,6 +29,10 @@ fi
 
 slog() { printf '[supervisor %s] %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$*" | tee -a "$SUP_LOG"; }
 
+HALT_BACKOFF="${NS_HALT_BACKOFF:-600}"   # when the breaker is OPEN, stay up and re-check this often
+LOCK="$STATE/supervisor.lock"
+DISPATCH_PID=""
+
 write_checkpoint() {  # write_checkpoint <phase> [shift]
     python3 - "$CHECKPOINT" "$1" "${2:-}" <<'PY' 2>/dev/null || true
 import json, os, sys
@@ -37,8 +41,34 @@ json.dump({"phase": phase, "shift": shift, "pid": os.getpid()}, open(out, "w"), 
 PY
 }
 
-shutdown() { slog "SIGTERM/SIGINT received — graceful shutdown"; write_checkpoint "stopped"; exit 0; }
+release_lock() { rm -rf "$LOCK" 2>/dev/null || true; }
+
+acquire_lock() {  # single-instance guard (atomic mkdir); reclaim a lock held by a dead pid
+    if mkdir "$LOCK" 2>/dev/null; then echo $$ > "$LOCK/pid"; return 0; fi
+    local opid; opid="$(cat "$LOCK/pid" 2>/dev/null || echo "")"
+    if [ -n "$opid" ] && kill -0 "$opid" 2>/dev/null; then
+        slog "another supervisor (pid $opid) holds the lock — exiting"
+        return 1
+    fi
+    slog "reclaiming stale supervisor lock (was pid ${opid:-unknown})"
+    rm -rf "$LOCK"
+    if mkdir "$LOCK" 2>/dev/null; then echo $$ > "$LOCK/pid"; return 0; fi
+    return 1
+}
+
+shutdown() {
+    slog "SIGTERM/SIGINT received — graceful shutdown"
+    if [ -n "${DISPATCH_PID:-}" ] && kill -0 "$DISPATCH_PID" 2>/dev/null; then
+        slog "forwarding TERM to in-flight dispatch (pid $DISPATCH_PID) and waiting"
+        kill -TERM "$DISPATCH_PID" 2>/dev/null || true
+        wait "$DISPATCH_PID" 2>/dev/null || true
+    fi
+    write_checkpoint "stopped"
+    release_lock
+    exit 0
+}
 trap shutdown TERM INT
+trap release_lock EXIT
 
 # Crash recovery: any shift left in active/ was interrupted (e.g. kill -9). Re-enqueue it.
 recover_orphans() {
@@ -59,31 +89,43 @@ run_loop() {  # run_loop [drain]
     local drain="${1:-}"
     while true; do
         write_checkpoint "dispatching"
-        bash "$SUP_DIR/dispatch.sh" once
-        rc=$?
+        # run dispatch as a child so SIGTERM can be forwarded within launchd's grace window
+        bash "$SUP_DIR/dispatch.sh" once & DISPATCH_PID=$!
+        wait "$DISPATCH_PID"; rc=$?
+        DISPATCH_PID=""
         case "$rc" in
-            11)  # guardrail halt (breaker OPEN / budget exceeded) — already notified by dispatch
-                slog "dispatch HALTED by guardrail — stopping supervisor (reset: guard.py breaker-reset)"
+            11)  # breaker OPEN / budget halt — STAY UP and idle so launchd KeepAlive never flaps;
+                 # re-check after a backoff. The breaker emits its alert once, on the OPEN edge.
                 write_checkpoint "halted"
-                return 0
+                if [ "$drain" = "drain" ]; then slog "halted by guardrail — drain-once stops (reset: guard.py breaker-reset)"; return 0; fi
+                slog "halted by guardrail — backing off ${HALT_BACKOFF}s, then re-checking (reset: guard.py breaker-reset)"
+                sleep "$HALT_BACKOFF"
                 ;;
-            12)  # rate-limited this hour — wait it out
+            12)  # rate-limited this hour
                 write_checkpoint "rate_limited"
                 [ "$drain" = "drain" ] && { slog "rate-limited — drain-once stops"; return 0; }
                 sleep "$IDLE"
+                ;;
+            13)  # review requeued the shift — pace before re-claiming so it doesn't hot-loop
+                write_checkpoint "requeued"
+                [ "$drain" = "drain" ] || sleep "$IDLE"
+                ;;
+            14)  # review escalated to failed/ — move on
+                slog "shift escalated to failed/ — continuing"
                 ;;
             10)  # queue empty
                 if [ "$drain" = "drain" ]; then slog "queue empty — drain-once complete"; write_checkpoint "drained"; return 0; fi
                 write_checkpoint "idle"
                 sleep "$IDLE"
                 ;;
-            *)   # processed a shift (0 or build rc); loop on to the next immediately
+            *)   # processed a shift (0 or build rc); continue
                 : ;;
         esac
     done
 }
 
 slog "supervisor starting (queue=$QUEUE, idle=${IDLE}s)"
+acquire_lock || exit 0
 recover_orphans
 case "${1:-daemon}" in
     --drain-once) run_loop drain ;;

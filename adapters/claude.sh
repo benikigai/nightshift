@@ -42,15 +42,18 @@ cat > "$WORKDIR/.claude/settings.local.json" <<'JSON'
 { "permissions": { "allow": ["Edit", "Write", "Read", "Glob", "Grep", "Bash"], "deny": [] } }
 JSON
 
-# --- build the prompt ---
+# --- build the prompt (incl. Nightshift cross-attempt memory) ---
 tasks="$(cat "$FEATURES" 2>/dev/null)"
 extra="$(cat "$PROMPT" 2>/dev/null || true)"
-full="You are building one shift. Implement every task whose passes=false in this JSON array of {id,category,description,verify}. Write complete code — no TODOs/stubs/placeholders — and make it build. If .ralph-logs/feedback.md exists, read it and do NOT repeat the failed approaches listed there.
+mem="$(cat "$WORKDIR/nightshift-memory.md" 2>/dev/null || true)"
+full="You are building one shift. Implement every task whose passes=false in this JSON array of {id,category,description,verify}. Write complete code — no TODOs/stubs/placeholders — and make it build.
 
 ## Shift tasks
 ${tasks}
 
-${extra}"
+${extra}
+
+${mem}"
 
 # --- run claude -p subscription-first; include --model only if configured (bash 3.2 safe: no empty-array) ---
 if [ -n "$MODEL" ]; then
