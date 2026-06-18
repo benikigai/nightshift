@@ -10,10 +10,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
+import shutil
+import subprocess
 import sys
 import time
 import traceback
+
+from extract_json import extract_json
 
 # --- W&B Weave setup (graceful fallback if unavailable) ---
 WEAVE_AVAILABLE = False
@@ -30,6 +33,58 @@ try:
     client = Anthropic()
 except Exception:
     client = None
+
+
+def _ns_evaluator_model(default="claude-sonnet-4-6"):
+    """Read models.evaluator from nightshift.config.json; fall back to default."""
+    cfg = os.environ.get(
+        "NIGHTSHIFT_CONFIG",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "nightshift", "nightshift.config.json"),
+    )
+    try:
+        with open(cfg) as f:
+            return json.load(f)["models"]["evaluator"]
+    except Exception:
+        return default
+
+
+def _evaluate_via_claude_cli(system_prompt, user_msg, model, feature_id):
+    """Subscription path: run the evaluator via `claude -p` with the metered API key
+    STRIPPED, forcing Claude Max OAuth (no pay-per-token cost). Returns a parsed result
+    dict, or None if the CLI is unavailable / errored / returned unparseable output — in
+    which case the caller falls back to the metered Anthropic SDK."""
+    if shutil.which("claude") is None:
+        return None
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)  # no key in env => claude can only use the subscription
+    cmd = [
+        "claude", "-p",
+        "--model", model,
+        "--output-format", "json",
+        "--append-system-prompt", system_prompt,
+        user_msg,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=150, env=env)
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    text, toks = proc.stdout, 0
+    try:
+        envelope = json.loads(proc.stdout)
+        text = envelope.get("result", proc.stdout)
+        usage = envelope.get("usage") or {}
+        toks = (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0)
+    except Exception:
+        pass
+    result = extract_json(text)
+    if result is None:
+        return None
+    result["tokens_evaluator"] = toks
+    result["_auth_path"] = "subscription"
+    return result
+
 
 EVALUATOR_SYSTEM_PROMPT = """You are a strict code quality evaluator for an autonomous build system called AgentForge.
 You receive a git diff and a feature specification. Score the implementation honestly.
@@ -77,14 +132,7 @@ Return ONLY valid JSON, no other text:
 
 
 def evaluate_feature(feature_id, description, verify, category, diff_text, attempt):
-    """Score a feature implementation via Sonnet 4."""
-    if client is None:
-        return {"feature_id": feature_id, "overall": 5, "pass": True,
-                "error": "Anthropic client unavailable, defaulting to pass",
-                "gates": {"compilation": True, "tests": True},
-                "scores": {"completeness": 5, "visual_quality": 5, "no_placeholders": 5},
-                "feedback": [], "summary": "Evaluator unavailable — auto-pass"}
-
+    """Score a feature implementation. Subscription-first (`claude -p`), metered SDK fallback."""
     user_msg = (
         "Feature #%d: %s\n"
         "Verify criteria: %s\n"
@@ -93,18 +141,30 @@ def evaluate_feature(feature_id, description, verify, category, diff_text, attem
         "## Git Diff\n```\n%s\n```"
     ) % (feature_id, description, verify, category, attempt, diff_text[:15000])
 
+    # Subscription-first: `claude -p` with API key stripped → Claude Max (no metered cost).
+    sub_result = _evaluate_via_claude_cli(EVALUATOR_SYSTEM_PROMPT, user_msg, _ns_evaluator_model(), feature_id)
+    if sub_result is not None:
+        return sub_result
+
+    # Metered fallback: Anthropic SDK — reached only if the subscription CLI is unavailable/errored.
+    if client is None:
+        return {"feature_id": feature_id, "overall": 5, "pass": True,
+                "error": "No subscription CLI and no Anthropic client — defaulting to pass",
+                "gates": {"compilation": True, "tests": True},
+                "scores": {"completeness": 5, "visual_quality": 5, "no_placeholders": 5},
+                "feedback": [], "summary": "Evaluator unavailable — auto-pass"}
+
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=_ns_evaluator_model(),
             max_tokens=1500,
             system=EVALUATOR_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_msg}]
         )
         raw = response.content[0].text
-        # Extract JSON from response (may have markdown wrapping)
-        json_match = re.search(r'\{[\s\S]*\}', raw)
-        if json_match:
-            result = json.loads(json_match.group())
+        # Triple-fallback extraction handles direct JSON, ```json``` fences, and brace-span.
+        result = extract_json(raw)
+        if result is not None:
             result["tokens_evaluator"] = response.usage.input_tokens + response.usage.output_tokens
             return result
         else:

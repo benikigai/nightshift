@@ -1,0 +1,78 @@
+# docs-check.yml — GitHub Actions workflow for IMPLEMENTATION_SPEC enforcement
+# Copy to .github/workflows/docs-check.yml in each project
+#
+# Fails PRs that modify source code without updating CHANGELOG.md.
+# Warns (but doesn't fail) if DEBUG.md is missing.
+
+name: Documentation Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check CHANGELOG.md updated
+        run: |
+          # Get files changed in this PR
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+
+          # Check if any source files changed (not just docs)
+          SOURCE=$(echo "$CHANGED" | grep -vE '^(CLAUDE\.md|AGENT\.md|DEBUG\.md|CHANGELOG\.md|archive/|docs/|\.github/|README|LICENSE)' || true)
+
+          if [[ -z "$SOURCE" ]]; then
+            echo "✅ Doc-only PR — CHANGELOG.md not required"
+            exit 0
+          fi
+
+          if echo "$CHANGED" | grep -q '^CHANGELOG.md$'; then
+            echo "✅ CHANGELOG.md updated"
+          else
+            echo "❌ CHANGELOG.md not updated"
+            echo ""
+            echo "This PR modifies source code but CHANGELOG.md was not updated."
+            echo "Add an entry describing what changed and why."
+            echo ""
+            echo "Source files changed:"
+            echo "$SOURCE"
+            exit 1
+          fi
+
+      - name: Check DEBUG.md updated (warning only)
+        if: always()
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          SOURCE=$(echo "$CHANGED" | grep -vE '^(CLAUDE\.md|AGENT\.md|DEBUG\.md|CHANGELOG\.md|archive/|docs/|\.github/|README|LICENSE)' || true)
+
+          if [[ -z "$SOURCE" ]]; then
+            exit 0
+          fi
+
+          if echo "$CHANGED" | grep -q '^DEBUG.md$'; then
+            echo "✅ DEBUG.md updated"
+          else
+            echo "⚠️ DEBUG.md not updated — consider refreshing the current state snapshot"
+          fi
+
+      - name: Check doc files exist
+        run: |
+          MISSING=0
+          for f in CLAUDE.md AGENT.md DEBUG.md CHANGELOG.md; do
+            if [[ ! -f "$f" ]]; then
+              echo "❌ Missing: $f"
+              MISSING=1
+            fi
+          done
+          if [[ "$MISSING" -eq 1 ]]; then
+            echo ""
+            echo "All projects must have CLAUDE.md, AGENT.md, DEBUG.md, and CHANGELOG.md"
+            echo "See ~/IMPLEMENTATION_SPEC.md for the documentation standard."
+            exit 1
+          fi
+          echo "✅ All 4 standard doc files present"
