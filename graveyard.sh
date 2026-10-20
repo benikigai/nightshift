@@ -8,15 +8,31 @@
 # The evaluator (Sonnet via evaluate.py) scores and provides feedback.
 #
 # Usage:
-#   ./ralph-loop.sh                                          # Default: AgentForge project
-#   ./ralph-loop.sh --features path/to/features.json         # Custom feature list
-#   ./ralph-loop.sh --prompt path/to/PROMPT_build.md         # Custom build prompt
-#   ./ralph-loop.sh --project-dir /path/to/project           # Run in different directory
-#   ./ralph-loop.sh --features f.json --prompt p.md --project-dir /proj  # All combined
+#   ./graveyard.sh                                          # Default: AgentForge project
+#   ./graveyard.sh --features path/to/features.json         # Custom feature list
+#   ./graveyard.sh --prompt path/to/PROMPT_build.md         # Custom build prompt
+#   ./graveyard.sh --project-dir /path/to/project           # Run in different directory
+#   ./graveyard.sh --features f.json --prompt p.md --project-dir /proj  # All combined
 set -uo pipefail
 
 # --- Locate AgentForge home (where evaluate.py, metrics_writer.py live) ---
 AGENTFORGE_HOME="$(cd "$(dirname "$0")" && pwd)"
+
+# --- Nightshift config (model ids etc.); falls back to literals if config absent ---
+NIGHTSHIFT_CONFIG="${NIGHTSHIFT_CONFIG:-$AGENTFORGE_HOME/../nightshift/nightshift.config.json}"
+ns_cfg() {  # ns_cfg <dotted.key> <default> — prints config value, or default on any failure
+    python3 - "$NIGHTSHIFT_CONFIG" "$1" "$2" <<'PY' 2>/dev/null || echo "$2"
+import json, sys
+cfg, key, default = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    d = json.load(open(cfg))
+    for p in [x for x in key.split('.') if x]:
+        d = d[p]
+    print(d)
+except Exception:
+    print(default)
+PY
+}
 
 # --- Argument Parsing (all optional, backward-compatible defaults) ---
 FEATURE_FILE=""
@@ -31,7 +47,7 @@ while [[ $# -gt 0 ]]; do
         --plan-prompt)  PLAN_PROMPT="$2"; shift 2 ;;
         --project-dir)  WORK_DIR="$2"; shift 2 ;;
         --help|-h)
-            echo "Usage: ralph-loop.sh [OPTIONS]"
+            echo "Usage: graveyard.sh [OPTIONS]"
             echo "  --features <path>      Feature list JSON (default: feature_list.json)"
             echo "  --prompt <path>        Build prompt file (default: PROMPT_build.md)"
             echo "  --plan-prompt <path>   Planning prompt file (default: PROMPT_plan.md)"
@@ -44,7 +60,7 @@ done
 
 # --- Resolve paths ---
 PROJECT_DIR="${WORK_DIR:-$AGENTFORGE_HOME}"
-cd "$PROJECT_DIR"
+cd "$PROJECT_DIR" || { echo "graveyard: cannot cd to project dir: $PROJECT_DIR" >&2; exit 1; }
 
 FEATURE_FILE="${FEATURE_FILE:-feature_list.json}"
 BUILD_PROMPT="${BUILD_PROMPT:-PROMPT_build.md}"
@@ -60,7 +76,7 @@ MAX_ATTEMPTS=3          # Inner loop: max attempts per feature
 PLAN_INTERVAL=10        # Run planning pass every N outer iterations
 PUSH_INTERVAL=2         # Git push every N completed features (was 5)
 CODEX_TIMEOUT=420       # 7 minutes max per codex exec call (was 5)
-CODEX_MODEL="gpt-5.3-codex"
+CODEX_MODEL="${CODEX_MODEL:-$(ns_cfg models.builder gpt-5.3-codex)}"
 
 # --- State ---
 LOG_DIR="$PROJECT_DIR/.ralph-logs"
@@ -177,7 +193,7 @@ while true; do
                 --full-auto -m "$CODEX_MODEL" \
                 2>&1 | tee "$LOG_DIR/iteration-${ITERATION}-plan.log" || true
             log "Pushing to origin (post-planning)..."
-            git push origin HEAD 2>&1 || log "WARNING: git push failed (network?)"
+            if [ -n "${NIGHTSHIFT_NO_PUSH:-}" ]; then log "push skipped (NIGHTSHIFT_NO_PUSH set)"; else git push origin HEAD 2>&1 || log "WARNING: git push failed (network?)"; fi
         else
             log "SKIP: No planning prompt found at $PLAN_PROMPT"
         fi
@@ -460,7 +476,7 @@ print(json.dumps(entry))
         # Push frequently for deploys
         if (( FEATURES_COMPLETED % PUSH_INTERVAL == 0 )); then
             log "Pushing to origin ($FEATURES_COMPLETED features done)..."
-            git push origin HEAD 2>&1 || log "WARNING: git push failed (network?)"
+            if [ -n "${NIGHTSHIFT_NO_PUSH:-}" ]; then log "push skipped (NIGHTSHIFT_NO_PUSH set)"; else git push origin HEAD 2>&1 || log "WARNING: git push failed (network?)"; fi
         fi
 
     else
@@ -519,7 +535,7 @@ done
 
 # --- Final Push ---
 log "Final push to origin..."
-git push origin HEAD 2>&1 || log "WARNING: final push failed"
+if [ -n "${NIGHTSHIFT_NO_PUSH:-}" ]; then log "final push skipped (NIGHTSHIFT_NO_PUSH set)"; else git push origin HEAD 2>&1 || log "WARNING: final push failed"; fi
 
 log ""
 log "=== AgentForge Ralph Loop Complete ==="

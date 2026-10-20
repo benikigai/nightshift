@@ -1,0 +1,48 @@
+name: Main Push Detector
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  detect-direct-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if push came from PR merge
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          AUTHOR="${{ github.event.head_commit.author.name }}"
+          SHA="${{ github.sha }}"
+          REPO="${{ github.repository }}"
+
+          # Check if this is a PR merge (squash or regular)
+          if echo "$COMMIT_MSG" | grep -qE '(Merge pull request #|^.+\(#[0-9]+\)$)'; then
+            echo "PR merge detected — this is expected. No alert needed."
+            exit 0
+          fi
+
+          echo "⚠️ Direct push to main detected!"
+          echo "  Repo: $REPO"
+          echo "  Author: $AUTHOR"
+          echo "  SHA: $SHA"
+          echo "  Message: $COMMIT_MSG"
+
+          # Alert Discord (if webhook configured)
+          if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+            curl -s -H "Content-Type: application/json" \
+              -d "{\"embeds\":[{\"title\":\"⚠️ Direct push to main detected\",\"description\":\"**Repo:** $REPO\\n**Author:** $AUTHOR\\n**SHA:** \`${SHA:0:8}\`\\n**Message:** $COMMIT_MSG\",\"color\":16711680,\"footer\":{\"text\":\"/ship enforcement\"},\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
+              "$DISCORD_WEBHOOK_URL" || true
+            echo "Discord alert sent."
+          fi
+
+          # Alert Telegram (if token configured)
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            TEXT="⚠️ *Direct push to main detected*%0A%0ARepo: $REPO%0AAuthor: $AUTHOR%0ASHA: \`${SHA:0:8}\`%0AMessage: $COMMIT_MSG"
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}&text=${TEXT}&parse_mode=Markdown" || true
+            echo "Telegram alert sent."
+          fi

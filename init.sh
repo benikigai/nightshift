@@ -16,11 +16,13 @@ echo "  node $(node --version)"
 echo "  codex $(codex --version 2>/dev/null || echo 'unknown')"
 echo "  python3 $(python3 --version 2>&1 | awk '{print $2}')"
 
-# --- API Keys ---
+# --- Auth (Nightshift: subscription-first; API keys are optional metered fallback) ---
 echo ""
-echo "Checking API keys..."
-[ -n "${OPENAI_API_KEY:-}" ] && echo "  OPENAI_API_KEY: set" || { echo "  FAIL: OPENAI_API_KEY not set"; exit 1; }
-[ -n "${ANTHROPIC_API_KEY:-}" ] && echo "  ANTHROPIC_API_KEY: set" || { echo "  FAIL: ANTHROPIC_API_KEY not set"; exit 1; }
+echo "Checking auth (subscription-first)..."
+command -v claude >/dev/null 2>&1 && echo "  claude CLI: present" || { echo "  FAIL: claude CLI not found (needed for evaluator + claude adapter)"; exit 1; }
+[ -f ~/.claude/.credentials.json ] && echo "  claude: subscription OAuth creds present" || echo "  WARN: claude not logged in (run: claude /login) — will use ANTHROPIC_API_KEY only if set"
+[ -n "${OPENAI_API_KEY:-}" ] && echo "  OPENAI_API_KEY: set (metered fallback available)" || echo "  OPENAI_API_KEY: unset (Codex uses ChatGPT subscription login)"
+[ -n "${ANTHROPIC_API_KEY:-}" ] && echo "  ANTHROPIC_API_KEY: set (metered fallback available)" || echo "  ANTHROPIC_API_KEY: unset (subscription-only)"
 
 # --- W&B ---
 echo ""
@@ -162,7 +164,7 @@ echo ""
 echo "Next steps:"
 echo "  1. Quick test: codex exec \"\$(cat PROMPT_build.md)\" --full-auto -m gpt-5.3-codex"
 echo "  2. Verify feature #1 was built correctly"
-echo "  3. At 12:30: tmux new -s ralph && caffeinate -s && ./ralph-loop.sh"
+echo "  3. At 12:30: tmux new -s ralph && caffeinate -s && ./graveyard.sh"
 echo ""
 echo "Make scripts executable:"
-echo "  chmod +x ralph-loop.sh init.sh"
+echo "  chmod +x graveyard.sh init.sh"
