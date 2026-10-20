@@ -2,54 +2,47 @@
 
 Controlled agent harness for lights-out software work.
 
-Nightshift runs persistent Ralph Loops over scoped GitHub tasks: build, gate,
+> **Status: Reference (public specimen).** Last meaningful update: June 2026 (repositioning as Nightshift); loop code last changed April 2026. The proof run itself is frozen. Active Nightshift development happens in the private supervisor repo.
+
+Nightshift runs persistent Ralph Loops over scoped tasks: build, gate,
 evaluate, retry, commit, audit.
 
 [Product page](https://nightshift.kogenlabs.dev) |
 [Original AgentForge demo](https://agent-forge-rho-ten.vercel.app)
 
-It is a lights-out software factory pattern for agentic development. Scoped
-specs go in, build/review/guard loops run, and only passing work gets committed.
-
-At the core is a bounded, auditable loop:
-
 ```txt
 spec -> build -> gate -> evaluate -> retry or commit -> audit
 ```
 
-The key idea is simple: the coding agent writes code, but the harness owns
-authority. The harness picks one task, runs the builder, checks the result,
-asks a separate evaluator to score it, records metrics, and only then commits
-or retries.
+The coding agent writes code, but the harness owns authority. The harness picks
+one task, runs the builder, checks the result, asks a separate evaluator to
+score it, records metrics, and only then commits or retries.
 
-## Why this exists
+## What this repo is
 
-Most agent coding runs fail in boring ways:
+This is the original **AgentForge** proof run (formerly `benikigai/AgentForge`),
+kept public as the Nightshift specimen. It contains:
 
-- the task is too broad
-- the agent grades its own work
-- failed attempts leave no useful trail
-- cost and retry behavior are invisible
-- success means "the agent said it worked"
-
-Nightshift makes the loop explicit. A builder can propose work, but it does not
-decide whether the work ships.
-
-## What this repo contains
-
-This repo is the original **AgentForge** proof run, now positioned as the public
-Nightshift specimen. It contains:
-
-- a reusable build loop (`ralph-loop.sh`)
+- a reusable build loop (`ralph-loop.sh`), the "Graveyard" stage of Nightshift
 - a structured feature queue (`feature_list.json`)
-- a separate evaluator contract (`evaluate.py`)
+- a separate evaluator contract (`EVALUATOR.md`, `evaluate.py`)
 - a mutation guard for feature specs (`json_guard.py`)
-- a metrics writer (`metrics_writer.py`)
+- a metrics writer (`metrics_writer.py`, `backfill_metrics.py`)
 - a generated Next.js dashboard that visualizes the run (`src/`)
 - the run data behind the dashboard (`public/metrics.json`)
 
-The dashboard is not just a demo page. It is the receipt for the loop that built
-it.
+The dashboard is the receipt for the loop that built it.
+
+## How it fits with related repos
+
+| Repo | Role | Former name |
+| --- | --- | --- |
+| `nightshift-brief` | Planning: `/spec`, `/yolo`, `/forge` Claude Code skills | SpecForge |
+| **`nightshift`** (this repo) | Build loop + proof dashboard | AgentForge |
+| `nightshift-handoff` | Review: multi-model `/review`, `/triage`, `/pr` | ReviewForge |
+| `nightshift-private` (private) | Supervisor: queue, dispatcher, guardrails, GitHub App, product site | - |
+
+Old `SpecForge` / `AgentForge` / `ReviewForge` URLs redirect to the renamed repos.
 
 ## Proof run
 
@@ -63,29 +56,8 @@ it.
 | Cost | about $0.95 |
 | Elapsed time | 76 minutes |
 
-The run produced a full dashboard with routes for overview, timeline, quality,
-features, token spend, git history, and architecture. Each chart reads from the
-same metrics file the loop wrote while building.
-
-## Architecture
-
-```txt
-Nightshift
-  supervisor for queued GitHub work
-
-Graveyard
-  one-task-at-a-time build loop
-
-Handoff
-  review layer: approve, request changes, requeue, or escalate
-
-Guard
-  budget, rate-limit, circuit-breaker, permission, and audit controls
-```
-
-This public repo is the Graveyard/AgentForge proof specimen. The broader
-Nightshift system adds queue supervision, GitHub comment triggers, check-run
-updates, Handoff review, and operational guardrails.
+Routes: overview, timeline, quality, features, token spend, git history, and
+architecture. Every chart reads from the metrics file the loop wrote while building.
 
 ## Loop mechanics
 
@@ -94,112 +66,68 @@ updates, Handoff review, and operational guardrails.
 3. Run the builder on exactly that feature.
 4. Run build/test gates.
 5. Send the diff to a separate evaluator.
-6. If score is below threshold, write targeted feedback and retry.
-7. If score passes, mark the feature, write metrics, commit, and continue.
+6. If the score is below threshold, write targeted feedback and retry.
+7. If the score passes, mark the feature, write metrics, commit, and continue.
 8. If attempts are exhausted, skip or escalate instead of pretending it passed.
 
-The builder is intentionally not allowed to mark its own feature complete.
-`json_guard.py` protects the feature list so the loop can only advance through
-controlled mutations.
+The builder cannot mark its own feature complete. `json_guard.py` protects the
+feature list so the loop only advances through controlled mutations. Evaluator
+feedback must name the file and the specific fix; vague feedback is rejected.
 
-## Why the evaluator matters
+## Layout
 
-Self-review is the weak point in many agent workflows. This repo uses a separate
-model/context to score the diff against the feature spec.
+```txt
+ralph-loop.sh        outer loop, retry loop, commit authority, push cadence
+kickoff.sh, init.sh  run bootstrap
+PROMPT_build.md      builder instructions
+PROMPT_plan.md       planning prompt
+EVALUATOR.md         evaluator scoring contract
+evaluate.py          evaluator bridge
+json_guard.py        feature-list mutation guard
+metrics_writer.py    metrics accumulator
+feature_list.json    the 30-feature queue from the proof run
+public/metrics.json  recorded proof-run data
+src/                 Next.js 15 dashboard (app router, Recharts)
+scripts/build.mjs    build wrapper
+```
 
-The scoring contract weights:
+## Run
 
-- completeness
-- visual/code quality
-- absence of placeholders
-- build/test gate behavior
-
-When a feature fails, feedback must name the file and the specific fix. Vague
-feedback is rejected by design.
-
-## Run locally
+Dashboard:
 
 ```sh
 npm install
-npm run dev
-```
-
-Open:
-
-```txt
-http://localhost:3000
-```
-
-Build and test:
-
-```sh
+npm run dev        # http://localhost:3000
 npm run build
-npm test
+npm test           # vitest
 ```
 
-Run the loop:
+Loop (requires the `codex` CLI for the builder and an evaluator model credential):
 
 ```sh
 ./ralph-loop.sh
-```
-
-Run the loop against another project:
-
-```sh
 ./ralph-loop.sh \
-  --features /path/to/features.json \
-  --prompt /path/to/PROMPT_build.md \
-  --project-dir /path/to/project
+  --features path/to/features.json \
+  --prompt path/to/PROMPT_build.md \
+  --project-dir path/to/project
 ```
 
-## Files to inspect first
+## Config and secrets
 
-- `ralph-loop.sh` - outer loop, retry loop, commit authority, push cadence
-- `PROMPT_build.md` - builder instructions
-- `EVALUATOR.md` - evaluator scoring contract
-- `evaluate.py` - evaluator bridge
-- `json_guard.py` - feature-list mutation guard
-- `metrics_writer.py` - metrics accumulator
-- `public/metrics.json` - recorded proof-run data
-- `src/app/architecture/page.tsx` - visual explanation of the system
+- Model credentials come from the shell environment (`OPENAI_API_KEY` /
+  Codex login for the builder, `ANTHROPIC_API_KEY` for the evaluator).
+- `.env` and `.env.local` are gitignored. Never commit keys.
+- The dashboard itself needs no secrets; it only reads `public/metrics.json`.
 
-## What to copy
+## Maintenance notes
 
-The useful pattern is not the dashboard UI. It is the loop contract:
+- Treat `public/metrics.json`, `feature_list.json`, and the commit history as
+  frozen evidence. Do not rewrite them.
+- `.ralph-pid` and `claude-progress.txt` are run leftovers and can be removed
+  and gitignored.
+- PR #1 (docs-enforcement CI, April 2026) is still open; merge or close it.
+- New harness features belong in the private supervisor repo, not here.
 
-- one scoped task at a time
-- builder and evaluator separated
-- objective gates before scoring
-- retries based on specific feedback
-- metrics written during the run
-- git commits only after passing work
-- explicit skip/escalation path
+## License
 
-That pattern can be moved into other agentic coding systems, data-quality loops,
-documentation loops, or ops workflows.
-
-## What this is not
-
-This repo is not the final hosted Nightshift product. It is the original public
-specimen: a working loop, a proof dashboard, and the evidence trail from the run
-that created it.
-
-The product direction is here:
-
-```txt
-https://nightshift.kogenlabs.dev
-```
-
-## Why star it
-
-Star this repo if you are interested in practical agentic engineering systems
-that care about:
-
-- bounded autonomy
-- evaluator backpressure
-- visible cost and retry behavior
-- git-backed audit trails
-- agent work that can stop safely
-
-The bet: agent workflows get more useful when the harness is stricter than the
-agent.
+No license file yet. Add one (MIT matches the sibling repos) if reuse is intended.
